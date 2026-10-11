@@ -19,6 +19,7 @@ inbox, creates/links the lead, stores a Call Log with transcript, and can send a
 - `.env`: `CRM_SECRET_<NAME>` = Webhook secret; `CRM_RECORDINGS_PASSWORD` = Recording password.
 - Recordings (local storage only): run `python -m receptionist.crm.recordings` behind HTTPS
   (e.g. Caddy `reverse_proxy localhost:8089`) on a **public** host — the CRM refuses private addresses.
+  The server listens on localhost only (`CRM_RECORDINGS_HOST`, default `127.0.0.1`) behind the HTTPS proxy.
 
 ## 3. Forward the business line to the AI receptionist
 South African businesses forward their existing number to the AI receptionist number with GSM codes:

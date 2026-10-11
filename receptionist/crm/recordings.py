@@ -27,6 +27,7 @@ def make_app(root: Path, password: str) -> web.Application:
         except ValueError:
             auth = None
         if auth is None or auth.login != USER or not hmac.compare_digest(auth.password.encode(), password.encode()):
+            logger.warning("recording request rejected: bad credentials from %s", request.remote)
             return web.Response(status=401, headers={"WWW-Authenticate": 'Basic realm="recordings"'})
         target = (root / request.match_info["path"]).resolve()
         if root not in target.parents or not target.is_file():
@@ -42,7 +43,8 @@ def main() -> None:
     logging.basicConfig(level=logging.INFO)
     root = Path(os.environ.get("CRM_RECORDINGS_ROOT", "./recordings"))
     port = int(os.environ.get("CRM_RECORDINGS_PORT", "8089"))
-    web.run_app(make_app(root, os.environ.get("CRM_RECORDINGS_PASSWORD", "")), port=port)
+    host = os.environ.get("CRM_RECORDINGS_HOST", "127.0.0.1")
+    web.run_app(make_app(root, os.environ.get("CRM_RECORDINGS_PASSWORD", "")), host=host, port=port)
 
 
 if __name__ == "__main__":
