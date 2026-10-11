@@ -60,3 +60,14 @@ resent; check the agent log for that call.
 
 ## Outcomes
 `transfer` > `message` > `after_hours` (call started outside `hours`) > `hangup`.
+
+## Plans and minutes
+At the start of every call the service asks the CRM (`crm.channels.webhooks.voice_status`, signed like call
+results) which mode to answer in, waiting at most 2 s (a hard ceiling on the whole check):
+- `normal`: the full receptionist.
+- `message_only`: the plan's minutes are used up (+10 % grace). Short greeting, take-message only, 45 s cap.
+- `off`: the plan has no AI receptionist, or the CRM is suspended. One "line unavailable" sentence, no recording, and nothing is sent to the CRM.
+
+If the CRM can't be reached, the call is answered normally. Minutes are metered from the CRM's append-only
+`CRM Voice Usage` ledger, not from Call Logs. Minutes, plans and prices are set on the control plane
+(SaaS Plan → AI Receptionist / Minutes per month).
