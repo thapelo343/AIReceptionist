@@ -5,6 +5,8 @@ import logging
 from typing import Any
 
 from receptionist.config import BusinessConfig
+from receptionist.crm.delivery import deliver_call_result
+from receptionist.crm.result import build_call_result
 from receptionist.email.summarizer import generate_call_summary
 from receptionist.intakes.models import IntakeSubmission
 from receptionist.messaging.models import DispatchContext, Message
@@ -357,6 +359,9 @@ class CallLifecycle:
                     },
                 )
 
+        crm_messages = list(self._pending_message_emails)
+        crm_submission = self._pending_intake_submission
+
         # Fan out email triggers.
         # Consolidated mode (triggers.on_call_end=True): exactly ONE email per
         # call — the call-end email absorbs pending message(s), the pending
@@ -460,6 +465,33 @@ class CallLifecycle:
         # best-effort.
         self._pending_intake_submission = None
         self._intake_case_type_display = None
+
+        if self.config.crm is not None:
+            await self._deliver_to_crm(
+                segments, crm_messages, crm_submission, artifact.url if artifact else None,
+            )
+
+    async def _deliver_to_crm(self, segments, messages, submission, artifact_url) -> None:
+        """Post the CallResult to the CRM. Best-effort: any failure is logged, never raised."""
+        try:
+            summary = await generate_call_summary(
+                segments=segments,
+                metadata=self.metadata,
+                submission=submission,
+                captured_messages=messages,
+                config=self.config.crm.summary,
+            )
+            payload = build_call_result(self.config, self.metadata, segments, messages, summary, artifact_url)
+            await deliver_call_result(self.config, payload)
+        except Exception:
+            logger.exception(
+                "CRM delivery crashed during call finalization",
+                extra={
+                    "call_id": self.metadata.call_id,
+                    "business_name": self.metadata.business_name,
+                    "component": "lifecycle.crm",
+                },
+            )
 
     async def _fire_email_trigger(
         self,

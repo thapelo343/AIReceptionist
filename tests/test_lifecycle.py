@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from receptionist.config import BusinessConfig
+from receptionist.config import BusinessConfig, CrmConfig
 from receptionist.lifecycle import CallLifecycle
 from receptionist.transcript.metadata import CallMetadata
 
@@ -917,3 +917,46 @@ async def test_no_summary_for_empty_call(tmp_path, config, mocker):
     summary_mock.assert_not_called()
     deliver_call_end_mock.assert_called_once()
     assert deliver_call_end_mock.call_args.kwargs["ai_summary"] is None
+@pytest.mark.asyncio
+async def test_call_end_delivers_to_crm(monkeypatch, make_lifecycle_with_crm):
+    sent = []
+
+    async def fake_deliver(config, payload, **_):
+        sent.append(payload)
+        return True
+
+    monkeypatch.setattr("receptionist.lifecycle.deliver_call_result", fake_deliver)
+    monkeypatch.setattr("receptionist.lifecycle.generate_call_summary", _fake_summary("Short summary."))
+    lifecycle = make_lifecycle_with_crm()
+    lifecycle.record_message_taken()
+    await lifecycle.on_call_ended()
+    await lifecycle.on_call_ended()  # idempotent: second call must not resend
+    assert len(sent) == 1
+    assert sent[0]["outcome"] == "message" and sent[0]["summary"] == "Short summary."
+
+
+@pytest.mark.asyncio
+async def test_crm_failure_never_breaks_call_end(monkeypatch, make_lifecycle_with_crm):
+    async def boom(*_a, **_k):
+        raise RuntimeError("network")
+
+    monkeypatch.setattr("receptionist.lifecycle.deliver_call_result", boom)
+    monkeypatch.setattr("receptionist.lifecycle.generate_call_summary", _fake_summary(None))
+    await make_lifecycle_with_crm().on_call_ended()  # must not raise
+
+
+def _fake_summary(value):
+    async def _summary(**_):
+        return value
+    return _summary
+
+
+@pytest.fixture
+def make_lifecycle_with_crm(config):
+    def _make():
+        crm_config = config.model_copy(update={"crm": CrmConfig(
+            url="https://crm.example.com/api/method/crm.channels.webhooks.voice",
+            secret_env="CRM_SECRET_TEST", business_number="+27105550100",
+        )})
+        return CallLifecycle(config=crm_config, call_id="lk-life-1", caller_phone="+27821234567")
+    return _make
