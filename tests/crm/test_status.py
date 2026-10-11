@@ -45,11 +45,22 @@ async def test_signed_request_and_modes(monkeypatch):
 @respx.mock
 async def test_fails_open(monkeypatch, caplog):
     monkeypatch.setenv("CRM_SECRET_TEST", "s3cret")
-    for response in (Response(403), Response(500), Response(200, text="<html>"), Response(200, json={"mode": "weird"}), Response(200, json=[1])):
+    for response in (Response(500), Response(502), Response(200, text="<html>"), Response(200, json={"mode": "weird"}), Response(200, json=[1])):
         respx.post(STATUS_URL).mock(return_value=response)
         assert await fetch_mode(_config()) == "normal"
     respx.post(STATUS_URL).mock(side_effect=httpx.ConnectTimeout("slow"))
     assert await fetch_mode(_config()) == "normal"
+    assert "s3cret" not in caplog.text
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_rejected_status_is_message_only(monkeypatch, caplog):
+    monkeypatch.setenv("CRM_SECRET_TEST", "s3cret")
+    for code in (401, 403):
+        respx.post(STATUS_URL).mock(return_value=Response(code))
+        assert await fetch_mode(_config()) == "message_only"
+        assert f"CRM rejected the mode check (HTTP {code}); answering in message-only mode" in caplog.text
     assert "s3cret" not in caplog.text
 
 

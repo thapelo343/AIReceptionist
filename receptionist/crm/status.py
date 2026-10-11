@@ -1,5 +1,9 @@
 # receptionist/crm/status.py
-"""Ask the CRM which mode to answer in. Fails open: any problem means "normal"."""
+"""Ask the CRM which mode to answer in.
+
+Fails open: an outage (timeout, network error, 5xx, bad JSON, unknown mode) means "normal".
+A 401/403 is a configuration or tamper signal, not an outage, so it means "message_only".
+"""
 from __future__ import annotations
 
 import asyncio
@@ -41,6 +45,13 @@ async def fetch_mode(config: Any) -> str:
     try:
         # httpx timeouts are per phase; wait_for is the hard ceiling on the whole check.
         response = await asyncio.wait_for(_request(), STATUS_TIMEOUT)
+        if response.status_code in (401, 403):
+            logger.warning(
+                "CRM rejected the mode check (HTTP %d); answering in message-only mode",
+                response.status_code,
+                extra=extra,
+            )
+            return "message_only"
         if response.status_code != 200:
             logger.warning("CRM mode check got HTTP %d; answering normally", response.status_code, extra=extra)
             return "normal"

@@ -68,6 +68,8 @@ results) which mode to answer in, waiting at most 2 s (a hard ceiling on the who
 - `message_only`: the plan's minutes are used up (+10 % grace). Short greeting, take-message only, 45 s cap.
 - `off`: the plan has no AI receptionist, or the CRM is suspended. One "line unavailable" sentence, no recording, and nothing is sent to the CRM.
 
-If the CRM can't be reached, the call is answered normally. Minutes are metered from the CRM's append-only
+If the CRM can't be reached (timeout, network error, 5xx, bad reply), the call is answered normally. If the
+CRM rejects the check (HTTP 401/403: wrong secret, unknown or disabled number), the call is answered in
+`message_only` mode, since that points at a configuration or tamper problem rather than an outage. Minutes are metered from the CRM's append-only
 `CRM Voice Usage` ledger, not from Call Logs. Minutes, plans and prices are set on the control plane
 (SaaS Plan → AI Receptionist / Minutes per month).
