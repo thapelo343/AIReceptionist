@@ -99,3 +99,19 @@ def test_sign_matches_crm_check():
     body = json.dumps({"v": 1}).encode()
     expected = "sha256=" + hmac.new(b"s3cret", body, hashlib.sha256).hexdigest()
     assert sign(body, "s3cret") == expected
+
+
+def _meta(caller_phone):
+    meta = CallMetadata(call_id="lk-p", business_name="Acme Dental", caller_phone=caller_phone,
+                        start_ts="2026-10-09T07:00:00+00:00")
+    meta.end_ts = "2026-10-09T07:01:00+00:00"
+    return meta
+
+
+def test_from_national_number_with_bogus_plus_is_fixed():
+    """SIP sometimes carries a national number; _normalize_sip_phone then prefixes '+'.
+    Send it as national ('0…') and let the CRM normalize it to E.164 with the business region."""
+    assert build_call_result(_config(), _meta("+0821234567"), [], [], None, None)["from"] == "0821234567"
+    assert build_call_result(_config(), _meta("+27821234567"), [], [], None, None)["from"] == "+27821234567"
+    assert build_call_result(_config(), _meta(None), [], [], None, None)["from"] == ""
+

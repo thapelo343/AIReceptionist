@@ -47,6 +47,18 @@ def recording_url(artifact_url: str | None, root: str, base_url: str | None) -> 
     return f"{base_url.rstrip('/')}/{quote(relative.as_posix())}"
 
 
+def caller_number(phone: str | None) -> str:
+    """The caller's number as the CRM expects it. Anonymous stays "".
+
+    A national number from SIP ("0821234567") gets a bogus "+" from
+    _normalize_sip_phone ("+0821234567"); send it back as national so the CRM
+    normalizes it to E.164 using the business number's country.
+    """
+    if not phone:
+        return ""
+    return phone[1:] if phone.startswith("+0") else phone
+
+
 def build_call_result(
     config: Any,
     metadata: CallMetadata,
@@ -64,7 +76,7 @@ def build_call_result(
     return {
         "v": VERSION,
         "call_id": metadata.call_id,
-        "from": metadata.caller_phone or "",
+        "from": caller_number(metadata.caller_phone),
         "to": crm.business_number,
         "started_at": metadata.start_ts,
         "ended_at": metadata.end_ts,
