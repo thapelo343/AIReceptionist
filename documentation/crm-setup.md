@@ -27,6 +27,12 @@ inbox, creates/links the lead, stores a Call Log with transcript, and can send a
   - Local recordings need **self-hosted LiveKit egress** on the voice host. With LiveKit Cloud egress the
     files are written on LiveKit's side, not on the voice host, so there is nothing to serve.
 
+### Phase A (multiple businesses) — required before onboarding a second business
+The recording server uses **one** password (`CRM_RECORDINGS_PASSWORD`) and **one** root
+(`CRM_RECORDINGS_ROOT`) for every business on the host, so any business's CRM could fetch another
+business's recordings. Until per-business credentials exist, run one recording server (its own port,
+root and password) per business, or add per-business credentials before hosting several businesses.
+
 ## 3. Forward the business line to the AI receptionist
 South African businesses forward their existing number to the AI receptionist number with GSM codes:
 - `**004*<number>#` forwards missed calls only (recommended).
