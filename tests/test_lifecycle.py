@@ -1037,6 +1037,38 @@ async def test_build_call_result_failure_archives_minimal_record(tmp_path, confi
 
 
 @pytest.mark.asyncio
+async def test_pending_file_written_before_summary(tmp_path, config, mocker):
+    """A hard kill during the (slow) summary must still leave a replayable pending file."""
+    import json
+
+    from receptionist.crm.delivery import failures_dir
+
+    cfg = _crm_consolidated(config, tmp_path)
+    seen = {}
+
+    async def summary_checks_pending(**_):
+        files = list(failures_dir(cfg).glob("pending-room-p.json"))
+        seen["files"] = [f.name for f in files]
+        seen["payload"] = json.loads(files[0].read_text()) if files else None
+        return "Later summary."
+
+    from receptionist.messaging.channels.email import EmailChannel as RuntimeEmailChannel
+
+    mocker.patch.object(RuntimeEmailChannel, "deliver_call_end", AsyncMock())
+    mocker.patch("receptionist.lifecycle.generate_call_summary", summary_checks_pending)
+    deliver = AsyncMock(return_value=True)
+    mocker.patch("receptionist.lifecycle.deliver_call_result", deliver)
+
+    lifecycle = CallLifecycle(config=cfg, call_id="room-p", caller_phone="+27821234567")
+    lifecycle.record_message_taken()
+    await lifecycle.on_call_ended()
+
+    assert seen["files"] == ["pending-room-p.json"]
+    assert seen["payload"]["call_id"] == "room-p" and seen["payload"]["summary"] == ""
+    assert deliver.call_args.args[1]["summary"] == "Later summary."
+
+
+@pytest.mark.asyncio
 async def test_finalization_survives_caller_cancellation(tmp_path, config, mocker):
     """The close handler's task may be cancelled at job shutdown; finalization is shielded
     and a later on_call_ended (the shutdown callback) waits for it instead of skipping."""

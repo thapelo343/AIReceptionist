@@ -6,7 +6,7 @@ import logging
 from typing import Any
 
 from receptionist.config import BusinessConfig
-from receptionist.crm.delivery import archive as archive_crm_failure, deliver_call_result
+from receptionist.crm.delivery import archive as archive_crm_failure, deliver_call_result, write_pending
 from receptionist.crm.result import build_call_result
 from receptionist.email.summarizer import generate_call_summary
 from receptionist.intakes.models import IntakeSubmission
@@ -514,6 +514,16 @@ class CallLifecycle:
             "component": "lifecycle.crm",
         }
         summary: str | None = None
+        # Write-ahead before the slow summary (up to its timeout), so a hard kill
+        # inside the worker's shutdown window still leaves a replayable record.
+        # deliver_call_result later overwrites this file with the summarised payload.
+        try:
+            write_pending(
+                self.config,
+                build_call_result(self.config, self.metadata, segments, messages, None, artifact_url),
+            )
+        except Exception:
+            logger.exception("could not write CRM pending file before summary", extra=extra)
         try:
             summary = await generate_call_summary(
                 segments=segments,

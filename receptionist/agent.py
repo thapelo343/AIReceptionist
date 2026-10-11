@@ -2411,7 +2411,7 @@ async def handle_call(ctx: agents.JobContext):
     # when the job ends. on_call_ended is idempotent and, when finalization is
     # already running, waits for it, so this keeps the job alive until the
     # transcript, CRM delivery and emails finish (bounded by the worker's
-    # shutdown_process_timeout; the CRM pending file covers a hard kill).
+    # shutdown_process_timeout; the CRM pending file, written before the summary, covers a hard kill).
     ctx.add_shutdown_callback(lifecycle.on_call_ended)
 
     logger.info(
