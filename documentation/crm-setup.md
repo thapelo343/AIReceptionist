@@ -20,6 +20,12 @@ inbox, creates/links the lead, stores a Call Log with transcript, and can send a
 - Recordings (local storage only): run `python -m receptionist.crm.recordings` behind HTTPS
   (e.g. Caddy `reverse_proxy localhost:8089`) on a **public** host — the CRM refuses private addresses.
   The server listens on localhost only (`CRM_RECORDINGS_HOST`, default `127.0.0.1`) behind the HTTPS proxy.
+- Recording paths must line up, or calls reach the CRM without a recording (the agent logs
+  `CRM call result <call_id> sent without recording: <reason>`):
+  - `crm.recordings_root` must contain `recording.storage.local.path` (the egress output folder).
+  - `CRM_RECORDINGS_ROOT` (the recording server's root) must equal `crm.recordings_root`.
+  - Local recordings need **self-hosted LiveKit egress** on the voice host. With LiveKit Cloud egress the
+    files are written on LiveKit's side, not on the voice host, so there is nothing to serve.
 
 ## 3. Forward the business line to the AI receptionist
 South African businesses forward their existing number to the AI receptionist number with GSM codes:

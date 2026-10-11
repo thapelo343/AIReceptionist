@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import logging
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Sequence
@@ -14,6 +15,7 @@ from receptionist.messaging.models import Message
 from receptionist.transcript.capture import SpeakerRole, TranscriptSegment
 from receptionist.transcript.metadata import CallMetadata
 
+logger = logging.getLogger("receptionist")
 VERSION = 1
 _ROLES = {SpeakerRole.ASSISTANT: "agent", SpeakerRole.USER: "caller"}
 
@@ -59,6 +61,14 @@ def caller_number(phone: str | None) -> str:
     return phone[1:] if phone.startswith("+0") else phone
 
 
+def _recording_drop_reason(artifact_url: str, root: str, base_url: str | None) -> str:
+    if not base_url:
+        return "crm.recordings_base_url is not set"
+    if "://" in artifact_url:
+        return "the recording is not a local file (local storage is required)"
+    return f"the recording is outside crm.recordings_root ({root})"
+
+
 def build_call_result(
     config: Any,
     metadata: CallMetadata,
@@ -73,6 +83,14 @@ def build_call_result(
     message: dict[str, str] = {}
     if last is not None:
         message = {k: v for k, v in {"reason": last.message, "callback_number": last.callback_number}.items() if v}
+    rec_url = recording_url(artifact_url, crm.recordings_root, crm.recordings_base_url)
+    recording = getattr(config, "recording", None)
+    if rec_url is None and artifact_url and recording is not None and recording.enabled:
+        logger.warning(
+            "CRM call result %s sent without recording: %s", metadata.call_id,
+            _recording_drop_reason(artifact_url, crm.recordings_root, crm.recordings_base_url),
+            extra={"call_id": metadata.call_id, "component": "crm.result"},
+        )
     return {
         "v": VERSION,
         "call_id": metadata.call_id,
@@ -92,7 +110,7 @@ def build_call_result(
             for s in segments
             if s.role in _ROLES and s.text
         ],
-        "recording_url": recording_url(artifact_url, crm.recordings_root, crm.recordings_base_url),
+        "recording_url": rec_url,
     }
 
 

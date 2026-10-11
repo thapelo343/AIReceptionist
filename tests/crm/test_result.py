@@ -115,3 +115,29 @@ def test_from_national_number_with_bogus_plus_is_fixed():
     assert build_call_result(_config(), _meta("+27821234567"), [], [], None, None)["from"] == "+27821234567"
     assert build_call_result(_config(), _meta(None), [], [], None, None)["from"] == ""
 
+
+
+def _recording_config(**crm):
+    cfg = _config(**crm)
+    cfg.recording = SimpleNamespace(enabled=True)
+    return cfg
+
+
+def test_warns_when_recording_url_dropped_outside_root(tmp_path, caplog):
+    cfg = _recording_config()
+    cfg.crm.recordings_base_url = "https://voice.example.com/recordings"
+    cfg.crm.recordings_root = str(tmp_path / "recordings")
+    result = build_call_result(cfg, _meta(None), [], [], None, str(tmp_path / "elsewhere" / "a.ogg"))
+    assert result["recording_url"] is None
+    assert "lk-p" in caplog.text and "recordings_root" in caplog.text
+
+
+def test_warns_when_recording_base_url_missing(tmp_path, caplog):
+    cfg = _recording_config()
+    build_call_result(cfg, _meta(None), [], [], None, str(tmp_path / "a.ogg"))
+    assert "recordings_base_url" in caplog.text
+
+
+def test_no_warning_without_recording(tmp_path, caplog):
+    build_call_result(_config(), _meta(None), [], [], None, None)
+    assert "recording" not in caplog.text
