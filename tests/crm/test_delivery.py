@@ -74,3 +74,68 @@ async def test_missing_secret_archived(tmp_path, monkeypatch, caplog):
     assert await deliver_call_result(_config(tmp_path), PAYLOAD, initial_delay=0) is False
     assert (tmp_path / "messages" / ".failures" / "crm-lk-9.json").exists()
     assert "CRM_SECRET_TEST" in caplog.text
+
+
+def _failures(tmp_path):
+    return tmp_path / "messages" / ".failures"
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_pending_file_exists_during_post_and_is_cleared_after_200(tmp_path, monkeypatch):
+    monkeypatch.setenv("CRM_SECRET_TEST", "s3cret")
+    seen = []
+
+    def _check(request):
+        pending = _failures(tmp_path) / "pending-lk-9.json"
+        seen.append(pending.exists() and json.loads(pending.read_text()) == PAYLOAD)
+        return Response(200)
+
+    respx.post(URL).mock(side_effect=_check)
+    assert await deliver_call_result(_config(tmp_path), PAYLOAD, initial_delay=0) is True
+    assert seen == [True]
+    assert not list(_failures(tmp_path).glob("*.json"))
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_cancel_mid_post_leaves_pending_and_reraises(tmp_path, monkeypatch):
+    import asyncio
+
+    monkeypatch.setenv("CRM_SECRET_TEST", "s3cret")
+    def _cancel(request):
+        raise asyncio.CancelledError()
+
+    respx.post(URL).mock(side_effect=_cancel)
+    with pytest.raises(asyncio.CancelledError):
+        await deliver_call_result(_config(tmp_path), PAYLOAD, initial_delay=0)
+    assert (_failures(tmp_path) / "pending-lk-9.json").exists()
+    assert not (_failures(tmp_path) / "crm-lk-9.json").exists()
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_failure_moves_pending_to_archive(tmp_path, monkeypatch):
+    monkeypatch.setenv("CRM_SECRET_TEST", "s3cret")
+    respx.post(URL).mock(return_value=Response(403))
+    assert await deliver_call_result(_config(tmp_path), PAYLOAD, initial_delay=0) is False
+    assert not (_failures(tmp_path) / "pending-lk-9.json").exists()
+    assert (_failures(tmp_path) / "crm-lk-9.json").exists()
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_unsafe_call_id_is_sanitized_for_filenames(tmp_path, monkeypatch):
+    monkeypatch.setenv("CRM_SECRET_TEST", "s3cret")
+    respx.post(URL).mock(return_value=Response(403))
+    payload = {**PAYLOAD, "call_id": "../room:1/x"}
+    assert await deliver_call_result(_config(tmp_path), payload, initial_delay=0) is False
+    assert (_failures(tmp_path) / "crm-.._room_1_x.json").exists()
+
+
+@pytest.mark.asyncio
+async def test_unserializable_payload_archives_instead_of_raising(tmp_path, monkeypatch):
+    monkeypatch.setenv("CRM_SECRET_TEST", "s3cret")
+    payload = {**PAYLOAD, "bad": object()}
+    assert await deliver_call_result(_config(tmp_path), payload, initial_delay=0) is False
+    assert (_failures(tmp_path) / "crm-lk-9.json").exists()
