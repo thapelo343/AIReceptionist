@@ -1326,3 +1326,9 @@ def test_crm_rejects_unknown_keys(minimal_business_dict):
     data = {**minimal_business_dict, "crm": {"url": "https://a.b/c", "secret_env": "X", "business_number": "+1", "secret": "inline"}}
     with pytest.raises(ValidationError):
         BusinessConfig(**data)
+
+
+def test_crm_recordings_base_url_must_be_https(minimal_business_dict):
+    data = {**minimal_business_dict, "crm": {"url": "https://a.b/c", "secret_env": "X", "business_number": "+1", "recordings_base_url": "http://x/recordings"}}
+    with pytest.raises(ValidationError):
+        BusinessConfig(**data)

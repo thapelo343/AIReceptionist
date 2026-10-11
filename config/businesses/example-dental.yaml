@@ -168,3 +168,11 @@ retention:
 #   buffer_placement: "after"              # "before" | "after" | "both"
 #   booking_window_days: 30
 #   earliest_booking_hours_ahead: 2
+
+# Optional: send every call to a Frappe CRM tenant (Voice channel).
+# crm:
+#   url: "https://acme.example.com/api/method/crm.channels.webhooks.voice"
+#   secret_env: "CRM_SECRET_ACME"          # same value as the Voice channel's Webhook secret
+#   business_number: "+27105550100"        # the AI receptionist number (E.164)
+#   recordings_base_url: "https://voice.example.com/recordings"   # https only; must equal the CRM's Recording server URL; omit if recordings are on S3
+#   recordings_root: "./recordings"

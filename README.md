@@ -123,6 +123,8 @@ The short version:
 
 For RingCentral/RingEX reception groups that should ring the AI alongside human receptionists, see [`documentation/ringcentral-setup.md`](documentation/ringcentral-setup.md).
 
+- [Sending calls to Frappe CRM](documentation/crm-setup.md)
+
 5. **Run:**
 
 ```bash

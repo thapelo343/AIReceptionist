@@ -579,11 +579,19 @@ class CrmConfig(BaseModel):
     recordings_root: str = "./recordings"
     summary: EmailSummaryConfig = Field(default_factory=EmailSummaryConfig)
 
-    @field_validator("url", "recordings_base_url")
+    @field_validator("url")
     @classmethod
-    def _http_only(cls, v: str | None) -> str | None:
-        if v is not None and not v.startswith(("https://", "http://")):
+    def _http_only(cls, v: str) -> str:
+        if not v.startswith(("https://", "http://")):
             raise ValueError("must be an http(s) URL")
+        return v.rstrip("/")
+
+    @field_validator("recordings_base_url")
+    @classmethod
+    def _https_only(cls, v: str | None) -> str | None:
+        # The CRM drops non-https recording URLs, so an http base never works.
+        if v is not None and not v.startswith("https://"):
+            raise ValueError("must be an https URL")
         return v.rstrip("/") if v else v
 
 
