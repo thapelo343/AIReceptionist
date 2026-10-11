@@ -28,6 +28,8 @@ from livekit.plugins import openai, noise_cancellation
 from receptionist.booking.availability import find_slots
 from receptionist.booking.models import SlotProposal
 from receptionist.config import BusinessConfig, load_config
+from receptionist.crm.modes import config_for_mode
+from receptionist.crm.status import fetch_mode
 from receptionist.info_packets import is_valid_email_destination, send_info_packet_email
 from receptionist.intakes.dtmf_capture import CaptureStatus, DigitCaptureBuffer
 from receptionist.lifecycle import CallLifecycle
@@ -2399,11 +2401,17 @@ async def handle_call(ctx: agents.JobContext):
     _trace_stage("after_watchdog_start", getattr(getattr(ctx, "room", None), "name", "?"))
     config = load_business_config(ctx)
     _trace_stage("after_load_config", getattr(getattr(ctx, "room", None), "name", "?"))
+    # Plan limits live in the CRM: ask which mode to answer in (2 s, fails open to normal).
+    crm_mode = await fetch_mode(config)
+    if crm_mode != "normal":
+        logger.info("CRM plan mode: %s", crm_mode, extra={"component": "agent.crm_mode", "call_id": ctx.room.name})
+    config = config_for_mode(config, crm_mode)
 
     lifecycle = CallLifecycle(
         config=config,
         call_id=ctx.room.name,
         caller_phone=_get_caller_phone(ctx),
+        crm_mode=crm_mode,
     )
     _trace_stage("after_lifecycle_init", lifecycle.metadata.call_id)
     # Job shutdown waits for registered shutdown callbacks (livekit-agents

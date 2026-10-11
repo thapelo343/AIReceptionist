@@ -81,8 +81,14 @@ def test_build_call_result_message_call():
         "message": {"reason": "Quote for 3 rooms", "callback_number": "+27821234567"},
         "language": "en",
         "transcript": [{"role": "agent", "text": "Hello"}, {"role": "caller", "text": "I need a quote"}],
-        "recording_url": None,
+        "recording_url": None, "limited": False,
     }
+
+
+def test_build_call_result_limited():
+    meta = CallMetadata(call_id="lk-3", business_name="Acme Dental", caller_phone="+27821234567",
+                        start_ts="2026-10-09T07:00:00+00:00")
+    assert build_call_result(_config(), meta, [], [], None, None, limited=True)["limited"] is True
 
 
 def test_build_call_result_transfer_and_anonymous():

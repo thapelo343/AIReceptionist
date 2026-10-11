@@ -1100,3 +1100,46 @@ async def test_finalization_survives_caller_cancellation(tmp_path, config, mocke
     gate.set()
     await second
     assert sent == ["room-c"]
+
+
+@pytest.mark.asyncio
+async def test_off_mode_posts_nothing(tmp_path, config, mocker):
+    from receptionist.crm.delivery import failures_dir
+    from receptionist.messaging.channels.email import EmailChannel as RuntimeEmailChannel
+
+    mocker.patch.object(RuntimeEmailChannel, "deliver_call_end", AsyncMock())
+    mocker.patch("receptionist.lifecycle.generate_call_summary", AsyncMock(return_value=None))
+    deliver = AsyncMock(return_value=True)
+    mocker.patch("receptionist.lifecycle.deliver_call_result", deliver)
+    cfg = _crm_consolidated(config, tmp_path)
+    lifecycle = CallLifecycle(config=cfg, call_id="room-off", caller_phone="+27821234567", crm_mode="off")
+    await lifecycle.on_call_ended()
+    deliver.assert_not_called()
+    assert not list(failures_dir(cfg).glob("*room-off*"))
+
+
+@pytest.mark.asyncio
+async def test_message_only_mode_delivers_limited(tmp_path, config, mocker):
+    from receptionist.messaging.channels.email import EmailChannel as RuntimeEmailChannel
+
+    mocker.patch.object(RuntimeEmailChannel, "deliver_call_end", AsyncMock())
+    mocker.patch("receptionist.lifecycle.generate_call_summary", AsyncMock(return_value="S."))
+    deliver = AsyncMock(return_value=True)
+    mocker.patch("receptionist.lifecycle.deliver_call_result", deliver)
+    lifecycle = CallLifecycle(config=_crm_consolidated(config, tmp_path), call_id="room-lim", caller_phone="+27821234567", crm_mode="message_only")
+    lifecycle.record_message_taken()
+    await lifecycle.on_call_ended()
+    assert deliver.call_args.args[1]["limited"] is True
+
+
+@pytest.mark.asyncio
+async def test_default_mode_not_limited(tmp_path, config, mocker):
+    from receptionist.messaging.channels.email import EmailChannel as RuntimeEmailChannel
+
+    mocker.patch.object(RuntimeEmailChannel, "deliver_call_end", AsyncMock())
+    mocker.patch("receptionist.lifecycle.generate_call_summary", AsyncMock(return_value=None))
+    deliver = AsyncMock(return_value=True)
+    mocker.patch("receptionist.lifecycle.deliver_call_result", deliver)
+    lifecycle = CallLifecycle(config=_crm_consolidated(config, tmp_path), call_id="room-n", caller_phone="+27821234567")
+    await lifecycle.on_call_ended()
+    assert deliver.call_args.args[1]["limited"] is False

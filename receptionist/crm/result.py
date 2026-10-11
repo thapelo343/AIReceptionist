@@ -76,6 +76,8 @@ def build_call_result(
     messages: Sequence[Message],
     summary: str | None,
     artifact_url: str | None,
+    *,
+    limited: bool = False,
 ) -> dict:
     crm = config.crm
     started = datetime.fromisoformat(metadata.start_ts)
@@ -111,6 +113,7 @@ def build_call_result(
             if s.role in _ROLES and s.text
         ],
         "recording_url": rec_url,
+        "limited": bool(limited),
     }
 
 

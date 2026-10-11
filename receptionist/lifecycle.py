@@ -39,8 +39,10 @@ class CallLifecycle:
         config: BusinessConfig,
         call_id: str,
         caller_phone: str | None,
+        crm_mode: str = "normal",
     ) -> None:
         self.config = config
+        self.crm_mode = crm_mode
         self.metadata = CallMetadata(
             call_id=call_id,
             business_name=config.business.name,
@@ -381,7 +383,7 @@ class CallLifecycle:
         # below when the settings match, so the LLM is called once per call.
         crm_summary_config = None
         crm_summary: str | None = None
-        if self.config.crm is not None:
+        if self.config.crm is not None and self.crm_mode != "off":
             crm_summary_config = self.config.crm.summary
             crm_summary = await self._deliver_to_crm(
                 segments,
@@ -520,7 +522,7 @@ class CallLifecycle:
         try:
             write_pending(
                 self.config,
-                build_call_result(self.config, self.metadata, segments, messages, None, artifact_url),
+                build_call_result(self.config, self.metadata, segments, messages, None, artifact_url, limited=self.crm_mode == "message_only"),
             )
         except Exception:
             logger.exception("could not write CRM pending file before summary", extra=extra)
@@ -535,7 +537,7 @@ class CallLifecycle:
         except Exception:
             logger.exception("CRM summary generation failed; delivering without it", extra=extra)
         try:
-            payload = build_call_result(self.config, self.metadata, segments, messages, summary, artifact_url)
+            payload = build_call_result(self.config, self.metadata, segments, messages, summary, artifact_url, limited=self.crm_mode == "message_only")
         except Exception as e:
             logger.exception("could not build CRM call result", extra=extra)
             archive_crm_failure(
