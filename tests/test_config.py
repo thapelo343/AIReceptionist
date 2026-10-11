@@ -2,45 +2,10 @@ import pytest
 from pathlib import Path
 from pydantic import ValidationError
 from receptionist.config import BusinessConfig, VoiceConfig, load_config
+from tests.conftest import EXAMPLE_YAML
 
 
-EXAMPLE_YAML = """
-business:
-  name: "Test Dental"
-  type: "dental office"
-  timezone: "America/New_York"
 
-voice:
-  voice_id: "coral"
-
-greeting: "Thank you for calling Test Dental."
-
-personality: "You are a friendly receptionist."
-
-hours:
-  monday: { open: "08:00", close: "17:00" }
-  tuesday: { open: "08:00", close: "17:00" }
-  wednesday: closed
-  thursday: { open: "08:00", close: "17:00" }
-  friday: { open: "08:00", close: "15:00" }
-  saturday: closed
-  sunday: closed
-
-after_hours_message: "We are currently closed."
-
-routing:
-  - name: "Front Desk"
-    number: "+15551234567"
-    description: "General inquiries"
-
-faqs:
-  - question: "Where are you located?"
-    answer: "123 Main Street."
-
-messages:
-  delivery: "file"
-  file_path: "./messages/test-dental/"
-"""
 
 
 def test_load_config_from_yaml_string():
@@ -1289,15 +1254,6 @@ def test_email_summary_parses_from_yaml_block():
     assert cfg.summary.enabled is False
     assert cfg.summary.model == "gpt-5.5"
     assert cfg.summary.reasoning_effort is None
-
-
-@pytest.fixture
-def minimal_business_dict():
-    import yaml
-
-    return yaml.safe_load(EXAMPLE_YAML)
-
-
 def test_crm_block_optional(minimal_business_dict):
     cfg = BusinessConfig(**minimal_business_dict)
     assert cfg.crm is None

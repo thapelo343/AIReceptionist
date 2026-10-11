@@ -87,3 +87,49 @@ def v2_yaml() -> str:
 @pytest.fixture
 def legacy_yaml() -> str:
     return EXAMPLE_YAML_LEGACY
+
+
+EXAMPLE_YAML = """
+business:
+  name: "Test Dental"
+  type: "dental office"
+  timezone: "America/New_York"
+
+voice:
+  voice_id: "coral"
+
+greeting: "Thank you for calling Test Dental."
+
+personality: "You are a friendly receptionist."
+
+hours:
+  monday: { open: "08:00", close: "17:00" }
+  tuesday: { open: "08:00", close: "17:00" }
+  wednesday: closed
+  thursday: { open: "08:00", close: "17:00" }
+  friday: { open: "08:00", close: "15:00" }
+  saturday: closed
+  sunday: closed
+
+after_hours_message: "We are currently closed."
+
+routing:
+  - name: "Front Desk"
+    number: "+15551234567"
+    description: "General inquiries"
+
+faqs:
+  - question: "Where are you located?"
+    answer: "123 Main Street."
+
+messages:
+  delivery: "file"
+  file_path: "./messages/test-dental/"
+"""
+
+
+@pytest.fixture
+def minimal_business_dict():
+    import yaml
+
+    return yaml.safe_load(EXAMPLE_YAML)
