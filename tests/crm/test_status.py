@@ -60,3 +60,22 @@ async def test_missing_secret_or_odd_url_is_normal(monkeypatch, caplog):
     monkeypatch.setenv("CRM_SECRET_TEST", "s3cret")
     assert await fetch_mode(_config(url="https://crm.example.com/somewhere-else")) == "normal"
     assert "CRM_SECRET_TEST" in caplog.text
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_hard_ceiling_on_slow_response(monkeypatch):
+    import asyncio
+    import time
+
+    monkeypatch.setenv("CRM_SECRET_TEST", "s3cret")
+    monkeypatch.setattr("receptionist.crm.status.STATUS_TIMEOUT", 0.2)
+
+    async def slow(request):
+        await asyncio.sleep(5)
+        return Response(200, json={"mode": "off"})
+
+    respx.post(STATUS_URL).mock(side_effect=slow)
+    start = time.monotonic()
+    assert await fetch_mode(_config()) == "normal"
+    assert time.monotonic() - start < 1

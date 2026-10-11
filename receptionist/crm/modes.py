@@ -15,7 +15,9 @@ _MESSAGE_ONLY_PERSONALITY = (
 _OFF_PERSONALITY = "Say only the greeting, then end the call. Do not take messages or answer questions."
 
 
-def _restricted(config: BusinessConfig, greeting: str, personality: str, seconds: int) -> BusinessConfig:
+def _restricted(
+    config: BusinessConfig, greeting: str, personality: str, seconds: int, extra: dict | None = None,
+) -> BusinessConfig:
     idle = config.voice.idle.model_copy(update={"max_call_duration_seconds": seconds})
     voice = config.voice.model_copy(update={"idle": idle})
     return config.model_copy(update={
@@ -28,6 +30,7 @@ def _restricted(config: BusinessConfig, greeting: str, personality: str, seconds
         "info_packets": None,
         "dtmf": None,
         "voice": voice,
+        **(extra or {}),
     })
 
 
@@ -40,7 +43,8 @@ def message_only_config(config: BusinessConfig) -> BusinessConfig:
 
 
 def off_config(config: BusinessConfig) -> BusinessConfig:
-    return _restricted(config, UNAVAILABLE_GREETING, _OFF_PERSONALITY, OFF_SECONDS)
+    # No recording in off mode: the consent preamble would eat the 8 s cap.
+    return _restricted(config, UNAVAILABLE_GREETING, _OFF_PERSONALITY, OFF_SECONDS, {"recording": None})
 
 
 def config_for_mode(config: BusinessConfig, mode: str) -> BusinessConfig:

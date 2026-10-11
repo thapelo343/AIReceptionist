@@ -2,6 +2,7 @@
 """Ask the CRM which mode to answer in. Fails open: any problem means "normal"."""
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -33,15 +34,19 @@ async def fetch_mode(config: Any) -> str:
     url = crm.url[: -len(WEBHOOK_SUFFIX)] + STATUS_SUFFIX
     body = json.dumps({"v": 1, "to": crm.business_number}, separators=(",", ":")).encode()
     headers = {"Content-Type": "application/json", "X-CRM-Signature": sign(body, secret)}
-    try:
+    async def _request() -> httpx.Response:
         async with httpx.AsyncClient(timeout=STATUS_TIMEOUT) as client:
-            response = await client.post(url, content=body, headers=headers)
+            return await client.post(url, content=body, headers=headers)
+
+    try:
+        # httpx timeouts are per phase; wait_for is the hard ceiling on the whole check.
+        response = await asyncio.wait_for(_request(), STATUS_TIMEOUT)
         if response.status_code != 200:
             logger.warning("CRM mode check got HTTP %d; answering normally", response.status_code, extra=extra)
             return "normal"
         data = response.json()
         mode = data.get("mode") if isinstance(data, dict) else None
-    except Exception as e:
+    except (asyncio.TimeoutError, Exception) as e:
         logger.warning("CRM mode check failed (%s); answering normally", type(e).__name__, extra=extra)
         return "normal"
     if mode not in MODES:

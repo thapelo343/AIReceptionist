@@ -36,3 +36,15 @@ def test_config_for_mode(business):
     assert config_for_mode(business, "message_only").voice.idle.max_call_duration_seconds == 45
     assert config_for_mode(business, "off").greeting == UNAVAILABLE_GREETING
     assert config_for_mode(business, "unexpected") is business
+
+
+def test_off_drops_recording_message_only_keeps_it(business):
+    from receptionist.config import RecordingConfig
+    recording = RecordingConfig(
+        enabled=True,
+        storage={"type": "local", "local": {"path": "./recordings"}},
+        consent_preamble={"enabled": True, "text": "This call may be recorded."},
+    )
+    cfg = business.model_copy(update={"recording": recording})
+    assert off_config(cfg).recording is None
+    assert message_only_config(cfg).recording == recording
