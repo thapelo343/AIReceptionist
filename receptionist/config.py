@@ -568,6 +568,25 @@ class EmailSummaryConfig(BaseModel):
         return v
 
 
+class CrmConfig(BaseModel):
+    """Delivery of one signed CallResult per call to a Frappe CRM tenant."""
+    model_config = ConfigDict(extra="forbid")
+
+    url: str
+    secret_env: str
+    business_number: str
+    recordings_base_url: str | None = None
+    recordings_root: str = "./recordings"
+    summary: EmailSummaryConfig = Field(default_factory=EmailSummaryConfig)
+
+    @field_validator("url", "recordings_base_url")
+    @classmethod
+    def _http_only(cls, v: str | None) -> str | None:
+        if v is not None and not v.startswith(("https://", "http://")):
+            raise ValueError("must be an http(s) URL")
+        return v.rstrip("/") if v else v
+
+
 class EmailConfig(BaseModel):
     model_config = ConfigDict(populate_by_name=True, extra="forbid")
 
@@ -936,6 +955,7 @@ class BusinessConfig(BaseModel):
     agent: AgentConfig = Field(default_factory=AgentConfig)
     info_packets: InfoPacketsConfig | None = None
     dtmf: DtmfConfig | None = None
+    crm: CrmConfig | None = None
 
     @model_validator(mode="after")
     def _dtmf_transfer_routing_must_exist(self) -> BusinessConfig:

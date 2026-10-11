@@ -1289,3 +1289,40 @@ def test_email_summary_parses_from_yaml_block():
     assert cfg.summary.enabled is False
     assert cfg.summary.model == "gpt-5.5"
     assert cfg.summary.reasoning_effort is None
+
+
+@pytest.fixture
+def minimal_business_dict():
+    import yaml
+
+    return yaml.safe_load(EXAMPLE_YAML)
+
+
+def test_crm_block_optional(minimal_business_dict):
+    cfg = BusinessConfig(**minimal_business_dict)
+    assert cfg.crm is None
+
+
+def test_crm_block_parsed(minimal_business_dict):
+    data = {**minimal_business_dict, "crm": {
+        "url": "https://acme.example.com/api/method/crm.channels.webhooks.voice",
+        "secret_env": "CRM_SECRET_ACME",
+        "business_number": "+27105550100",
+        "recordings_base_url": "https://voice.example.com/recordings",
+    }}
+    cfg = BusinessConfig(**data)
+    assert cfg.crm.business_number == "+27105550100"
+    assert cfg.crm.recordings_root == "./recordings"
+    assert cfg.crm.summary.enabled is True
+
+
+def test_crm_url_must_be_http(minimal_business_dict):
+    data = {**minimal_business_dict, "crm": {"url": "file:///x", "secret_env": "X", "business_number": "+1"}}
+    with pytest.raises(ValidationError):
+        BusinessConfig(**data)
+
+
+def test_crm_rejects_unknown_keys(minimal_business_dict):
+    data = {**minimal_business_dict, "crm": {"url": "https://a.b/c", "secret_env": "X", "business_number": "+1", "secret": "inline"}}
+    with pytest.raises(ValidationError):
+        BusinessConfig(**data)
