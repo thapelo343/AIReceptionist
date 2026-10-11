@@ -199,3 +199,11 @@ def test_handle_call_does_not_block_on_close_event():
         "Remove the 'Timed out waiting for on_call_ended' warning — it fires "
         "on every call >30s and alarms operators for no real reason."
     )
+
+
+def test_handle_call_registers_finalization_as_shutdown_callback():
+    """Job shutdown awaits shutdown callbacks but may cancel the close handler's
+    background task; finalization (CRM delivery) must be registered so the job waits."""
+    from pathlib import Path
+    agent_src = (Path(__file__).resolve().parents[2] / "receptionist" / "agent.py").read_text(encoding="utf-8")
+    assert "ctx.add_shutdown_callback(lifecycle.on_call_ended)" in agent_src

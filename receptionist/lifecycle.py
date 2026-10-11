@@ -1,11 +1,12 @@
 # receptionist/lifecycle.py
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 
 from receptionist.config import BusinessConfig
-from receptionist.crm.delivery import deliver_call_result
+from receptionist.crm.delivery import archive as archive_crm_failure, deliver_call_result
 from receptionist.crm.result import build_call_result
 from receptionist.email.summarizer import generate_call_summary
 from receptionist.intakes.models import IntakeSubmission
@@ -70,6 +71,11 @@ class CallLifecycle:
         # handler then invokes it again on natural disconnect. The second
         # call must be a no-op or operators receive duplicate emails.
         self._finalized: bool = False
+        # The finalization work runs in its own task, shielded from the
+        # caller: the close handler's task can be cancelled at job shutdown,
+        # and the job's shutdown callback calls on_call_ended again to wait
+        # for this task (see agent.handle_call).
+        self._finalize_task: asyncio.Future | None = None
 
     def _build_email_channels(self) -> list:
         """Pre-construct EmailChannel instances when email triggers will need them.
@@ -313,18 +319,29 @@ class CallLifecycle:
                 "component": "lifecycle.on_call_ended",
             },
         )
-        if self._finalized:
+        if self._finalize_task is not None:
             logger.info(
-                "on_call_ended: already finalized, skipping",
+                "on_call_ended: already finalized, waiting for it to finish",
                 extra={
                     "call_id": self.metadata.call_id,
                     "business_name": self.metadata.business_name,
                     "component": "lifecycle.finalized",
                 },
             )
+            try:
+                await asyncio.shield(self._finalize_task)
+            except Exception:
+                pass  # already reported to the first caller
             return
         self._finalized = True
         self.metadata.mark_finalized()
+        self._finalize_task = asyncio.ensure_future(self._finalize())
+        # Retrieve the exception if every caller was cancelled, so asyncio
+        # doesn't warn "Task exception was never retrieved".
+        self._finalize_task.add_done_callback(lambda t: t.cancelled() or t.exception())
+        await asyncio.shield(self._finalize_task)
+
+    async def _finalize(self) -> None:
 
         artifact: RecordingArtifact | None = None
         if self.recording_handle is not None:
@@ -359,8 +376,19 @@ class CallLifecycle:
                     },
                 )
 
-        crm_messages = list(self._pending_message_emails)
-        crm_submission = self._pending_intake_submission
+        # CRM delivery runs FIRST: it is the system of record and the email
+        # fan-out can take a long time. Its summary is shared with the email
+        # below when the settings match, so the LLM is called once per call.
+        crm_summary_config = None
+        crm_summary: str | None = None
+        if self.config.crm is not None:
+            crm_summary_config = self.config.crm.summary
+            crm_summary = await self._deliver_to_crm(
+                segments,
+                list(self._pending_message_emails),
+                self._pending_intake_submission,
+                artifact.url if artifact else None,
+            )
 
         # Fan out email triggers.
         # Consolidated mode (triggers.on_call_end=True): exactly ONE email per
@@ -411,7 +439,15 @@ class CallLifecycle:
                     or self._pending_intake_submission is not None
                     or self.metadata.appointment_booked
                 )
-                if has_content and self._email_channels and self.config.email.summary.enabled:
+                if (
+                    has_content and self._email_channels and self.config.email.summary.enabled
+                    and crm_summary_config is not None
+                    and crm_summary_config == self.config.email.summary
+                ):
+                    # Same model/settings as the CRM summary above: reuse it
+                    # rather than calling the LLM a second time.
+                    ai_summary = crm_summary
+                elif has_content and self._email_channels and self.config.email.summary.enabled:
                     try:
                         ai_summary = await generate_call_summary(
                             segments=segments,
@@ -466,13 +502,18 @@ class CallLifecycle:
         self._pending_intake_submission = None
         self._intake_case_type_display = None
 
-        if self.config.crm is not None:
-            await self._deliver_to_crm(
-                segments, crm_messages, crm_submission, artifact.url if artifact else None,
-            )
+    async def _deliver_to_crm(self, segments, messages, submission, artifact_url) -> str | None:
+        """Post the CallResult to the CRM and return the summary used.
 
-    async def _deliver_to_crm(self, segments, messages, submission, artifact_url) -> None:
-        """Post the CallResult to the CRM. Best-effort: any failure is logged, never raised."""
+        Best-effort: failures are logged and archived to .failures/, never
+        raised (CancelledError still propagates; the pending file remains).
+        """
+        extra = {
+            "call_id": self.metadata.call_id,
+            "business_name": self.metadata.business_name,
+            "component": "lifecycle.crm",
+        }
+        summary: str | None = None
         try:
             summary = await generate_call_summary(
                 segments=segments,
@@ -481,17 +522,22 @@ class CallLifecycle:
                 captured_messages=messages,
                 config=self.config.crm.summary,
             )
+        except Exception:
+            logger.exception("CRM summary generation failed; delivering without it", extra=extra)
+        try:
             payload = build_call_result(self.config, self.metadata, segments, messages, summary, artifact_url)
+        except Exception as e:
+            logger.exception("could not build CRM call result", extra=extra)
+            archive_crm_failure(
+                self.config, {"call_id": self.metadata.call_id},
+                f"build_call_result failed: {type(e).__name__}: {e}",
+            )
+            return summary
+        try:
             await deliver_call_result(self.config, payload)
         except Exception:
-            logger.exception(
-                "CRM delivery crashed during call finalization",
-                extra={
-                    "call_id": self.metadata.call_id,
-                    "business_name": self.metadata.business_name,
-                    "component": "lifecycle.crm",
-                },
-            )
+            logger.exception("CRM delivery crashed during call finalization", extra=extra)
+        return summary
 
     async def _fire_email_trigger(
         self,

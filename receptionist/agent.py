@@ -2406,6 +2406,13 @@ async def handle_call(ctx: agents.JobContext):
         caller_phone=_get_caller_phone(ctx),
     )
     _trace_stage("after_lifecycle_init", lifecycle.metadata.call_id)
+    # Job shutdown waits for registered shutdown callbacks (livekit-agents
+    # >= 1.8), whereas the close handler's background task can be cancelled
+    # when the job ends. on_call_ended is idempotent and, when finalization is
+    # already running, waits for it, so this keeps the job alive until the
+    # transcript, CRM delivery and emails finish (bounded by the worker's
+    # shutdown_process_timeout; the CRM pending file covers a hard kill).
+    ctx.add_shutdown_callback(lifecycle.on_call_ended)
 
     logger.info(
         "callerid: handle_call snapshot caller_phone_present=%s room=%s",

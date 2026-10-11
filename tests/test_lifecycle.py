@@ -960,3 +960,111 @@ def make_lifecycle_with_crm(config):
         )})
         return CallLifecycle(config=crm_config, call_id="lk-life-1", caller_phone="+27821234567")
     return _make
+
+
+def _crm_consolidated(config, tmp_path):
+    cfg = _consolidated_config(config, tmp_path)
+    return cfg.model_copy(update={"crm": CrmConfig(
+        url="https://crm.example.com/api/method/crm.channels.webhooks.voice",
+        secret_env="CRM_SECRET_TEST", business_number="+27105550100",
+    )})
+
+
+@pytest.mark.asyncio
+async def test_crm_delivered_before_email_and_summary_generated_once(tmp_path, config, mocker):
+    from receptionist.messaging.channels.email import EmailChannel as RuntimeEmailChannel
+    from receptionist.messaging.models import Message
+
+    order = []
+
+    async def fake_deliver(cfg, payload, **_):
+        order.append(("crm", payload["summary"]))
+        return True
+
+    async def fake_email(*_a, **kwargs):
+        order.append(("email", kwargs["ai_summary"]))
+
+    mocker.patch("receptionist.lifecycle.deliver_call_result", fake_deliver)
+    mocker.patch.object(RuntimeEmailChannel, "deliver_call_end", fake_email)
+    summary_mock = AsyncMock(return_value="Shared.")
+    mocker.patch("receptionist.lifecycle.generate_call_summary", summary_mock)
+
+    lifecycle = CallLifecycle(config=_crm_consolidated(config, tmp_path), call_id="room-o", caller_phone=None)
+    lifecycle.enqueue_message_email(Message("J", "+15551110000", "m", "Test Dental"))
+    await lifecycle.on_call_ended()
+
+    assert order == [("crm", "Shared."), ("email", "Shared.")]
+    summary_mock.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_email_summary_regenerated_when_settings_differ(tmp_path, config, mocker):
+    from receptionist.messaging.channels.email import EmailChannel as RuntimeEmailChannel
+    from receptionist.messaging.models import Message
+
+    cfg = _crm_consolidated(config, tmp_path)
+    cfg = cfg.model_copy(update={"crm": cfg.crm.model_copy(update={
+        "summary": cfg.crm.summary.model_copy(update={"model": "gpt-other"}),
+    })})
+    mocker.patch("receptionist.lifecycle.deliver_call_result", AsyncMock(return_value=True))
+    mocker.patch.object(RuntimeEmailChannel, "deliver_call_end", AsyncMock())
+    summary_mock = AsyncMock(return_value="S.")
+    mocker.patch("receptionist.lifecycle.generate_call_summary", summary_mock)
+
+    lifecycle = CallLifecycle(config=cfg, call_id="room-d", caller_phone=None)
+    lifecycle.enqueue_message_email(Message("J", "+15551110000", "m", "Test Dental"))
+    await lifecycle.on_call_ended()
+    assert summary_mock.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_build_call_result_failure_archives_minimal_record(tmp_path, config, mocker):
+    import json
+
+    cfg = _crm_consolidated(config, tmp_path)
+    mocker.patch("receptionist.lifecycle.generate_call_summary", AsyncMock(return_value=None))
+    mocker.patch("receptionist.lifecycle.build_call_result", side_effect=ValueError("bad hours"))
+    deliver = AsyncMock(return_value=True)
+    mocker.patch("receptionist.lifecycle.deliver_call_result", deliver)
+
+    lifecycle = CallLifecycle(config=cfg, call_id="room:b", caller_phone=None)
+    await lifecycle.on_call_ended()
+
+    deliver.assert_not_called()
+    from receptionist.crm.delivery import failures_dir
+    record = json.loads((failures_dir(cfg) / "crm-room_b.json").read_text())
+    assert record["payload"]["call_id"] == "room:b" and "bad hours" in record["error"]
+
+
+@pytest.mark.asyncio
+async def test_finalization_survives_caller_cancellation(tmp_path, config, mocker):
+    """The close handler's task may be cancelled at job shutdown; finalization is shielded
+    and a later on_call_ended (the shutdown callback) waits for it instead of skipping."""
+    import asyncio
+
+    gate = asyncio.Event()
+    sent = []
+
+    async def slow_deliver(cfg, payload, **_):
+        await gate.wait()
+        sent.append(payload["call_id"])
+        return True
+
+    mocker.patch("receptionist.lifecycle.deliver_call_result", slow_deliver)
+    mocker.patch("receptionist.lifecycle.generate_call_summary", AsyncMock(return_value=None))
+    cfg = config.model_copy(update={"crm": CrmConfig(
+        url="https://crm.example.com/x", secret_env="CRM_SECRET_TEST", business_number="+27105550100",
+    )})
+    lifecycle = CallLifecycle(config=cfg, call_id="room-c", caller_phone=None)
+
+    first = asyncio.create_task(lifecycle.on_call_ended())
+    await asyncio.sleep(0.05)
+    first.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await first
+    second = asyncio.create_task(lifecycle.on_call_ended())
+    await asyncio.sleep(0.01)
+    assert not second.done()
+    gate.set()
+    await second
+    assert sent == ["room-c"]
