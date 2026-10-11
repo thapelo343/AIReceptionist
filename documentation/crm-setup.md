@@ -30,8 +30,21 @@ South African businesses forward their existing number to the AI receptionist nu
 The CRM's Voice channel page shows these codes with Copy and Dial buttons.
 
 ## 4. Failures
-Undeliverable results are written to `<messages dir>/.failures/crm-<call_id>.json`. 4xx responses are not
-retried (fix the config, then re-POST the archived `payload` with the same signature scheme).
+Before the first POST, each result is written to `<messages dir>/.failures/pending-<call_id>.json`; the file
+is deleted once the CRM accepts it. If the job is cut off mid-delivery, the pending file stays. Undeliverable
+results (4xx, which are not retried, or 5xx/network after 3 attempts) move to `.failures/crm-<call_id>.json`
+with the error.
+
+After fixing the cause (secret, URL, CRM channel settings), resend them:
+
+```bash
+python -m receptionist.crm.replay --config config/businesses/<business>.yaml --all
+python -m receptionist.crm.replay --config config/businesses/<business>.yaml messages/<business>/.failures/crm-<call_id>.json
+```
+
+It prints one line per file (`ok`, or `failed: <reason>`), deletes files that were delivered and keeps the rest.
+A `crm-*.json` whose error starts with `build_call_result failed` holds only the call id and cannot be
+resent; check the agent log for that call.
 
 ## Outcomes
 `transfer` > `message` > `after_hours` (call started outside `hours`) > `hangup`.
