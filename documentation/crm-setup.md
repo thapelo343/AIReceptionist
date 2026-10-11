@@ -65,8 +65,10 @@ resent; check the agent log for that call.
 At the start of every call the service asks the CRM (`crm.channels.webhooks.voice_status`, signed like call
 results) which mode to answer in, waiting at most 2 s (a hard ceiling on the whole check):
 - `normal`: the full receptionist.
-- `message_only`: the plan's minutes are used up (+10 % grace). Short greeting, take-message only, 45 s cap.
-- `off`: the plan has no AI receptionist, or the CRM is suspended. One "line unavailable" sentence, no recording, and nothing is sent to the CRM.
+- `message_only`: the plan's minutes are used up (+10 % grace). Short greeting, take-message only, 45 s cap; when the cap ends the call the caller hears "Thanks for calling. We've got your message and will get back to you."
+- `off`: the plan has no AI receptionist, or the CRM is suspended. One "line unavailable" sentence, then the call ends with no goodbye (8 s cap as a safety net), no recording, and nothing is sent to the CRM.
+
+The duration caps start once the agent session is up, so connection time is not counted.
 
 If the CRM can't be reached (timeout, network error, 5xx, bad reply), the call is answered normally. If the
 CRM rejects the check (HTTP 401/403: wrong secret, unknown or disabled number), the call is answered in

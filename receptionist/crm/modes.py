@@ -7,6 +7,7 @@ from receptionist.config import BusinessConfig
 MESSAGE_ONLY_SECONDS = 45
 OFF_SECONDS = 8
 UNAVAILABLE_GREETING = "Sorry, this line isn't available right now. Please try again later."
+MESSAGE_ONLY_GOODBYE = "Thanks for calling. We've got your message and will get back to you."
 _MESSAGE_ONLY_PERSONALITY = (
     "Take a message only. Ask for the caller's name, callback number and reason for calling, "
     "save it with the take_message tool, thank them and end the call. Do not answer other "
@@ -53,3 +54,8 @@ def config_for_mode(config: BusinessConfig, mode: str) -> BusinessConfig:
     if mode == "off":
         return off_config(config)
     return config
+
+
+def cap_goodbye(mode: str) -> str | None:
+    """Fixed goodbye when the duration cap ends a limited call; None keeps the default per-reason text."""
+    return MESSAGE_ONLY_GOODBYE if mode == "message_only" else None

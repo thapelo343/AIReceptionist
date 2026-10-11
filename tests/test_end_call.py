@@ -349,6 +349,52 @@ async def test_speak_goodbye_and_terminate_hangs_up_on_playout_timeout(
     terminate.assert_awaited_once()
 
 
+@pytest.mark.asyncio
+async def test_speak_goodbye_uses_given_goodbye_text(v2_yaml, monkeypatch):
+    """Message-only cap: the caller hears the fixed goodbye, not the run-long text."""
+    from receptionist.agent import _speak_goodbye_and_terminate
+
+    config = BusinessConfig.from_yaml_string(v2_yaml)
+    lifecycle = CallLifecycle(config=config, call_id="r-1", caller_phone=None)
+    handle = MagicMock()
+    handle.wait_for_playout = AsyncMock()
+    session = MagicMock()
+    session.generate_reply = MagicMock(return_value=handle)
+    monkeypatch.setattr("receptionist.agent._get_caller_identity", lambda _ctx: "sip_1")
+    monkeypatch.setattr("receptionist.agent._terminate_room", AsyncMock())
+
+    goodbye = "Thanks for calling. We've got your message and will get back to you."
+    await _speak_goodbye_and_terminate(
+        session, lifecycle, _job_ctx(), reason="max_duration_reached", goodbye=goodbye,
+    )
+    instructions = session.generate_reply.call_args.kwargs["instructions"]
+    assert goodbye in instructions
+    assert "run long" not in instructions
+
+    session.generate_reply.reset_mock()
+    await _speak_goodbye_and_terminate(
+        session, lifecycle, _job_ctx(), reason="max_duration_reached",
+    )
+    assert "run long" in session.generate_reply.call_args.kwargs["instructions"]
+
+
+@pytest.mark.asyncio
+async def test_speak_goodbye_without_session_only_terminates(v2_yaml, monkeypatch):
+    """Off mode ends the call with no goodbye: no session means nothing is spoken."""
+    from receptionist.agent import _speak_goodbye_and_terminate
+
+    config = BusinessConfig.from_yaml_string(v2_yaml)
+    lifecycle = CallLifecycle(config=config, call_id="r-1", caller_phone=None, crm_mode="off")
+    lifecycle.on_call_ended = AsyncMock()
+    monkeypatch.setattr("receptionist.agent._get_caller_identity", lambda _ctx: "sip_1")
+    terminate = AsyncMock()
+    monkeypatch.setattr("receptionist.agent._terminate_room", terminate)
+
+    await _speak_goodbye_and_terminate(None, lifecycle, _job_ctx(), reason="plan_off")
+    terminate.assert_awaited_once()
+    lifecycle.on_call_ended.assert_awaited_once()
+
+
 def test_agent_end_reason_whitelist_matches_documentation():
     """Hard-pinned vocabulary so future contributors must update both code
     and docs (function-tools-reference.md / CHANGELOG) when adding a reason."""

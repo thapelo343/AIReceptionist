@@ -4,8 +4,8 @@ import pytest
 
 from receptionist.config import BusinessConfig, CrmConfig
 from receptionist.crm.modes import (
-    MESSAGE_ONLY_SECONDS, OFF_SECONDS, UNAVAILABLE_GREETING,
-    config_for_mode, message_only_config, off_config,
+    MESSAGE_ONLY_GOODBYE, MESSAGE_ONLY_SECONDS, OFF_SECONDS, UNAVAILABLE_GREETING,
+    cap_goodbye, config_for_mode, message_only_config, off_config,
 )
 
 
@@ -48,3 +48,11 @@ def test_off_drops_recording_message_only_keeps_it(business):
     cfg = business.model_copy(update={"recording": recording})
     assert off_config(cfg).recording is None
     assert message_only_config(cfg).recording == recording
+
+
+def test_cap_goodbye_per_mode():
+    assert cap_goodbye("message_only") == MESSAGE_ONLY_GOODBYE == (
+        "Thanks for calling. We've got your message and will get back to you."
+    )
+    assert cap_goodbye("normal") is None
+    assert cap_goodbye("off") is None

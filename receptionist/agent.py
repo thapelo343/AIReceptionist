@@ -28,7 +28,7 @@ from livekit.plugins import openai, noise_cancellation
 from receptionist.booking.availability import find_slots
 from receptionist.booking.models import SlotProposal
 from receptionist.config import BusinessConfig, load_config
-from receptionist.crm.modes import config_for_mode
+from receptionist.crm.modes import OFF_SECONDS, cap_goodbye, config_for_mode
 from receptionist.crm.status import fetch_mode
 from receptionist.info_packets import is_valid_email_destination, send_info_packet_email
 from receptionist.intakes.dtmf_capture import CaptureStatus, DigitCaptureBuffer
@@ -824,8 +824,13 @@ async def _speak_goodbye_and_terminate(
     job_ctx: agents.JobContext,
     *,
     reason: str,
+    goodbye: str | None = None,
 ) -> None:
     """Speak a brief goodbye then disconnect the SIP caller.
+
+    `goodbye` replaces the per-reason instructions with fixed text (the
+    message-only duration cap). A `session` of None speaks nothing and only
+    hangs up (off mode, which already spoke its one sentence).
 
     Used by `Receptionist.end_call` (caller said goodbye) and the
     silence/duration/unproductive watchers in `handle_call`. Each call site
@@ -839,9 +844,13 @@ async def _speak_goodbye_and_terminate(
     """
     call_id = lifecycle.metadata.call_id
     log_extra = {"call_id": call_id, "component": "agent.end"}
-    instructions = _AGENT_END_INSTRUCTIONS.get(
-        reason, _AGENT_END_INSTRUCTIONS["caller_goodbye"],
-    )
+    if goodbye:
+        instructions = f"""Say exactly this, verbatim, then stop:
+{goodbye}"""
+    else:
+        instructions = _AGENT_END_INSTRUCTIONS.get(
+            reason, _AGENT_END_INSTRUCTIONS["caller_goodbye"],
+        )
 
     handle = None
     if session is not None:
@@ -1371,10 +1380,35 @@ class Receptionist(Agent):
             )
 
         greeting_text = self.config.greeting
+        if self.lifecycle.crm_mode == "off":
+            await self._greet_and_end_off(greeting_text)
+            return
         await self.session.generate_reply(
             instructions=f"""Greet the caller with:
 {greeting_text}"""
         )
+
+    async def _greet_and_end_off(self, greeting_text: str) -> None:
+        """Off mode: one sentence, then hang up with no goodbye (the 8 s cap stays as a safety net)."""
+        log_extra = {"call_id": self.lifecycle.metadata.call_id, "component": "agent.crm_mode"}
+        handle = self.session.generate_reply(
+            instructions=f"""Say exactly this, verbatim, then stop:
+{greeting_text}"""
+        )
+        try:
+            await asyncio.wait_for(handle.wait_for_playout(), timeout=OFF_SECONDS)
+        except asyncio.TimeoutError:
+            logger.warning("off mode: greeting playout timed out; hanging up", extra=log_extra)
+        except Exception:
+            logger.exception("off mode: error waiting for greeting playout; hanging up", extra=log_extra)
+        self.lifecycle.record_agent_ended("plan_off")
+        job_ctx = get_job_context()
+        lifecycle = self.lifecycle
+
+        async def _run_end() -> None:
+            await _speak_goodbye_and_terminate(None, lifecycle, job_ctx, reason="plan_off")
+
+        _create_background_task(_run_end())
 
     @function_tool()
     async def lookup_faq(self, ctx: RunContext, question: str) -> str:
@@ -2645,11 +2679,12 @@ async def handle_call(ctx: agents.JobContext):
 
     session.on("user_input_transcribed", _on_absolute_silence_user_input)
 
-    # Issue #11 max-duration cap. Single one-shot timer scheduled at
-    # session start; cancelled by the close handler so a normal hangup
+    # Issue #11 max-duration cap. Single one-shot timer armed once
+    # session.start returns (so connection time doesn't eat the short
+    # plan-mode caps); cancelled by the close handler so a normal hangup
     # doesn't double-fire the goodbye.
     duration_state: dict[str, asyncio.TimerHandle | bool | None] = {
-        "timer": None, "scheduled": False,
+        "timer": None, "scheduled": False, "closed": False,
     }
 
     def _on_max_duration_reached() -> None:
@@ -2666,14 +2701,22 @@ async def handle_call(ctx: agents.JobContext):
             },
         )
 
+        # Off mode already spoke its one sentence: hang up without a goodbye.
+        # Message-only gets a fixed goodbye instead of the "run long" text.
+        speak_session = None if lifecycle.crm_mode == "off" else session
+        goodbye = cap_goodbye(lifecycle.crm_mode)
+
         async def _run() -> None:
             await _speak_goodbye_and_terminate(
-                session, lifecycle, ctx, reason="max_duration_reached",
+                speak_session, lifecycle, ctx, reason="max_duration_reached",
+                goodbye=goodbye,
             )
 
         _create_background_task(_run())
 
-    if idle_cfg.max_call_duration_seconds:
+    def _arm_max_duration_timer() -> None:
+        if not idle_cfg.max_call_duration_seconds or duration_state["closed"]:
+            return
         loop = asyncio.get_event_loop()
         duration_state["timer"] = loop.call_later(
             idle_cfg.max_call_duration_seconds, _on_max_duration_reached,
@@ -2695,6 +2738,7 @@ async def handle_call(ctx: agents.JobContext):
         # hangup doesn't accidentally fire goodbye-after-disconnect later.
         _cancel_silence_grace_timer()
         _cancel_absolute_silence_timer()
+        duration_state["closed"] = True
         timer = duration_state["timer"]
         if timer is not None:
             timer.cancel()
@@ -2736,6 +2780,7 @@ async def handle_call(ctx: agents.JobContext):
         ),
     )
     _trace_stage("session_start_returned", lifecycle.metadata.call_id)
+    _arm_max_duration_timer()
     try:
         await _refresh_realtime_tools(
             receptionist, call_id=lifecycle.metadata.call_id,

@@ -89,3 +89,47 @@ async def test_on_enter_skips_preamble_when_preamble_disabled(v2_yaml, tmp_path,
     await receptionist.on_enter()
 
     assert patched_session.generate_reply.call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_on_enter_off_mode_greets_then_ends_without_goodbye(v2_yaml, patched_session, monkeypatch):
+    """Off mode: speak the unavailable greeting, wait for it, then hang up with no second goodbye."""
+    from receptionist.crm.modes import off_config
+
+    config = off_config(BusinessConfig.from_yaml_string(v2_yaml))
+    lifecycle = CallLifecycle(config=config, call_id="room-1", caller_phone=None, crm_mode="off")
+    events: list[str] = []
+    handle = MagicMock()
+    handle.wait_for_playout = AsyncMock(side_effect=lambda: events.append("playout"))
+    patched_session.generate_reply = MagicMock(return_value=handle)
+    job_ctx = MagicMock()
+    monkeypatch.setattr("receptionist.agent.get_job_context", lambda: job_ctx)
+    terminate = AsyncMock(side_effect=lambda *a, **k: events.append("terminate"))
+    monkeypatch.setattr("receptionist.agent._speak_goodbye_and_terminate", terminate)
+
+    receptionist = Receptionist(config, lifecycle)
+    await receptionist.on_enter()
+    import asyncio
+    await asyncio.sleep(0)  # let the background hangup task run
+
+    assert patched_session.generate_reply.call_count == 1
+    assert config.greeting in patched_session.generate_reply.call_args.kwargs["instructions"]
+    assert events == ["playout", "terminate"]
+    assert lifecycle.metadata.agent_end_reason == "plan_off"
+    args, kwargs = terminate.call_args
+    assert args[0] is None, "no session: nothing more is spoken"
+    assert args[1] is lifecycle and args[2] is job_ctx
+    assert kwargs["reason"] == "plan_off"
+
+
+@pytest.mark.asyncio
+async def test_on_enter_normal_mode_does_not_hang_up(v2_yaml, patched_session, monkeypatch):
+    config = BusinessConfig.from_yaml_string(v2_yaml)
+    lifecycle = CallLifecycle(config=config, call_id="room-1", caller_phone=None)
+    terminate = AsyncMock()
+    monkeypatch.setattr("receptionist.agent._speak_goodbye_and_terminate", terminate)
+
+    await Receptionist(config, lifecycle).on_enter()
+
+    terminate.assert_not_awaited()
+    assert lifecycle.metadata.agent_end_reason is None
